@@ -2,6 +2,13 @@ package metacenter
 
 import "context"
 
+const (
+	// DataTypeInt 数字类型
+	DataTypeInt = "int"
+	// DataTypeString 字符串类型
+	DataTypeString = "string"
+)
+
 // DataType 数据类型
 type DataType struct {
 	// ID 唯一ID
@@ -15,7 +22,7 @@ type DataType struct {
 // DataTypeGetter 数据类型获取器
 type DataTypeGetter interface {
 	// GetByID 根据id获取数据类型配置
-	GetByID(context.Context, string) *DataType
+	GetByID(context.Context, int) *DataType
 }
 
 // DefaultDataTypeGetter 默认数据类型获取器
@@ -28,6 +35,6 @@ func NewDefaultDataTypeGetter() *DefaultDataTypeGetter {
 }
 
 // GetByID 根据id获取数据类型配置
-func (d *DefaultDataTypeGetter) GetByID(context.Context, string) *DataType {
+func (d *DefaultDataTypeGetter) GetByID(context.Context, int) *DataType {
 	return &DataType{}
 }
