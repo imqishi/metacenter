@@ -1,6 +1,7 @@
 package metacenter
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -10,6 +11,10 @@ import (
 	"strings"
 
 	"github.com/iancoleman/strcase"
+	"github.com/pingcap/tidb/parser"
+	"github.com/pingcap/tidb/parser/ast"
+	"github.com/pingcap/tidb/parser/types"
+	_ "github.com/pingcap/tidb/types/parser_driver"
 )
 
 // MetaCenter 元信息中心接口
@@ -22,6 +27,8 @@ type MetaCenter interface {
 	GetAllTables(ctx context.Context) []*Table
 	// GenerateGoFiles 生成go文件
 	GenerateGoFiles(ctx context.Context) error
+	// ParseFromMySQLDDL 将MySQL-DDL语句转化为定义的meta结构
+	ParseFromMySQLDDL(ctx context.Context, ddl string) (*Table, error)
 }
 
 // DefaultMetaCenter 默认实现
@@ -216,4 +223,72 @@ func (d *DefaultMetaCenter) generateModelFile(ctx context.Context) error {
 // generateDAOFile 生成dao文件
 func (d *DefaultMetaCenter) generateDAOFile(ctx context.Context) error {
 	return nil
+}
+
+// ParseFromMySQLDDL 将MySQL-DDL语句转化为定义的meta结构
+func (d *DefaultMetaCenter) ParseFromMySQLDDL(ctx context.Context, ddl string) (*Table, error) {
+	p := parser.New()
+	stmts, _, err := p.ParseSQL(ddl)
+	if err != nil {
+		return nil, fmt.Errorf("parse ddl fail: %w", err)
+	}
+	if len(stmts) == 0 {
+		return nil, fmt.Errorf("parse ddl fail, no stmt found")
+	}
+	stmt, ok := stmts[0].(*ast.CreateTableStmt)
+	if !ok {
+		return nil, fmt.Errorf("parse ddl fail, not ast.CreateTableStmt")
+	}
+	ret := d.parseMySQLDDLTable(stmt)
+	for _, col := range stmt.Cols {
+		field := d.parseMySQLDDLField(ctx, col)
+		ret.Fields = append(ret.Fields, field)
+	}
+	// for _, constraint := range stmt.Constraints {
+	// 	fmt.Println(constraint.Tp) // PK
+	// 	for _, key := range constraint.Keys {
+	// 		fmt.Println(key.Column)
+	// 	}
+	// 	fmt.Println("------")
+	// }
+	return ret, nil
+}
+
+func (d *DefaultMetaCenter) parseMySQLDDLField(ctx context.Context, col *ast.ColumnDef) *Field {
+	field := &Field{
+		Name: col.Name.Name.O,
+	}
+	switch col.Tp.EvalType() {
+	case types.ETInt:
+		field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeInt).ID
+	case types.ETDecimal:
+		field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeFloat).ID
+	case types.ETDatetime:
+		field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeDateTime).ID
+	default:
+		field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeString).ID
+	}
+	for _, option := range col.Options {
+		if option.Tp == ast.ColumnOptionComment {
+			buf := bytes.NewBuffer(nil)
+			option.Expr.Format(buf)
+			field.CName = strings.Trim(buf.String(), `"`)
+		}
+	}
+	if field.CName == "" {
+		field.CName = field.Name
+	}
+	return field
+}
+
+func (*DefaultMetaCenter) parseMySQLDDLTable(stmt *ast.CreateTableStmt) *Table {
+	ret := &Table{
+		Name: stmt.Table.Name.O,
+	}
+	for _, option := range stmt.Options {
+		if option.Tp == ast.TableOptionComment {
+			ret.CName = option.StrValue
+		}
+	}
+	return ret
 }

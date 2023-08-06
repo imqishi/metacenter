@@ -7,6 +7,12 @@ const (
 	DataTypeInt = "int"
 	// DataTypeString 字符串类型
 	DataTypeString = "string"
+	// DataTypeFloat 浮点数类型
+	DataTypeFloat = "float64"
+	// DataTypeDateTime 时间类型
+	DataTypeDateTime = "datetime"
+	// DataTypeEnum 枚举类型
+	DataTypeEnum = "enum"
 )
 
 // DataType 数据类型
@@ -23,6 +29,8 @@ type DataType struct {
 type DataTypeGetter interface {
 	// GetByID 根据id获取数据类型配置
 	GetByID(context.Context, int) *DataType
+	// GetByName 根据变量类型获取数据类型配置
+	GetByName(context.Context, string) *DataType
 }
 
 // DefaultDataTypeGetter 默认数据类型获取器
@@ -36,5 +44,10 @@ func NewDefaultDataTypeGetter() *DefaultDataTypeGetter {
 
 // GetByID 根据id获取数据类型配置
 func (d *DefaultDataTypeGetter) GetByID(context.Context, int) *DataType {
+	return &DataType{}
+}
+
+// GetByName 根据变量类型名称获取类型配置
+func (d *DefaultDataTypeGetter) GetByName(context.Context, string) *DataType {
 	return &DataType{}
 }

@@ -2,9 +2,11 @@ package metacenter
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/agiledragon/gomonkey/v2"
+	_ "github.com/pingcap/tidb/types/parser_driver"
 )
 
 func TestDefaultMetaCenter_GenerateGoFiles(t *testing.T) {
@@ -152,6 +154,102 @@ func TestDefaultMetaCenter_GenerateGoFiles(t *testing.T) {
 			defer p1.Reset()
 			if err := d.GenerateGoFiles(tt.args.ctx); (err != nil) != tt.wantErr {
 				t.Errorf("DefaultMetaCenter.GenerateGoFiles() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDefaultMetaCenter_ParseFromMySQLDDL(t *testing.T) {
+	type fields struct {
+		tableGetter      TableGetter
+		tableFieldGetter TableFieldGetter
+		fieldGetter      FieldGetter
+		enumGetter       EnumGetter
+		enumValueGetter  EnumValueGetter
+		dataTypeGetter   DataTypeGetter
+	}
+	type args struct {
+		ctx context.Context
+		ddl string
+	}
+	tableGetter := NewDefaultTableGetter()
+	tableFieldGetter := NewDefaultTableFieldGetter()
+	fieldGetter := NewDefaultFieldGetter()
+	enumGetter := NewDefaultEnumGetter()
+	enumValueGetter := NewDefaultEnumValueGetter()
+	dataTypeGetter := NewDefaultDataTypeGetter()
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		want    *Table
+		wantErr bool
+	}{
+		{
+			"success",
+			fields{
+				tableGetter:      tableGetter,
+				tableFieldGetter: tableFieldGetter,
+				fieldGetter:      fieldGetter,
+				enumGetter:       enumGetter,
+				enumValueGetter:  enumValueGetter,
+				dataTypeGetter:   dataTypeGetter,
+			},
+			args{
+				ctx: context.Background(),
+				ddl: "CREATE TABLE `t` (" +
+					"`id` int NOT NULL AUTO_INCREMENT COMMENT 'pk-id'," +
+					"`s` char(60) DEFAULT NULL COMMENT 'testcomment'," +
+					"PRIMARY KEY (`id`)," +
+					"UNIQUE KEY (`id`,`s`)" +
+					") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT 'tabletestcomment'",
+			},
+			&Table{
+				Name:  "t",
+				CName: "tabletestcomment",
+				Fields: []*Field{
+					{
+						Name:  "id",
+						CName: "pk-id",
+						Type:  1,
+					},
+					{
+						Name:  "s",
+						CName: "testcomment",
+						Type:  2,
+					},
+				},
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &DefaultMetaCenter{
+				tableGetter:      tt.fields.tableGetter,
+				tableFieldGetter: tt.fields.tableFieldGetter,
+				fieldGetter:      tt.fields.fieldGetter,
+				enumGetter:       tt.fields.enumGetter,
+				enumValueGetter:  tt.fields.enumValueGetter,
+				dataTypeGetter:   tt.fields.dataTypeGetter,
+			}
+			p0 := gomonkey.ApplyMethodFunc(tt.fields.dataTypeGetter, "GetByName", func(ctx context.Context, name string) *DataType {
+				if name == "string" {
+					return &DataType{ID: 2}
+				}
+				if name == "int" {
+					return &DataType{ID: 1}
+				}
+				return &DataType{}
+			})
+			defer p0.Reset()
+			got, err := d.ParseFromMySQLDDL(tt.args.ctx, tt.args.ddl)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("DefaultMetaCenter.ParseFromMySQLDDL() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("DefaultMetaCenter.ParseFromMySQLDDL() = %v, want %v", got, tt.want)
 			}
 		})
 	}
