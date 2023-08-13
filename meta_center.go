@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -255,9 +256,11 @@ func (d *DefaultMetaCenter) ParseFromMySQLDDL(ctx context.Context, ddl string) (
 }
 
 func (d *DefaultMetaCenter) parseMySQLDDLField(ctx context.Context, col *ast.ColumnDef) *Field {
+	// 解析字段英文名
 	field := &Field{
 		Name: col.Name.Name.O,
 	}
+	// 解析字段类型
 	switch col.Tp.EvalType() {
 	case types.ETInt:
 		field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeInt).ID
@@ -268,17 +271,63 @@ func (d *DefaultMetaCenter) parseMySQLDDLField(ctx context.Context, col *ast.Col
 	default:
 		field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeString).ID
 	}
+	// 解析字段注释，尝试解析字段的中文名，以及如果有枚举值解析为枚举类型
 	for _, option := range col.Options {
 		if option.Tp == ast.ColumnOptionComment {
 			buf := bytes.NewBuffer(nil)
 			option.Expr.Format(buf)
-			field.CName = strings.Trim(buf.String(), `"`)
+			comment := strings.Trim(buf.String(), `"`)
+			name, enumKV := d.tryParseEnumFromComment(comment)
+			fmt.Println(comment, name, enumKV)
+			field.CName = name
+			if len(enumKV) == 0 {
+				continue
+			}
+			field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeEnum).ID
+			field.Enum = &Enum{
+				CName:      name,
+				DataTypeID: d.dataTypeGetter.GetByName(ctx, DataTypeInt).ID,
+			}
+			for k, v := range enumKV {
+				field.Enum.Values = append(field.Enum.Values, &EnumValue{
+					EnumID: field.Enum.ID,
+					EName:  strcase.ToCamel(field.Name) + k,
+					Desc:   v,
+					Value:  k,
+				})
+			}
 		}
 	}
 	if field.CName == "" {
 		field.CName = field.Name
 	}
 	return field
+}
+
+var (
+	enumNameRE = regexp.MustCompile(`(\S+)(\s+(\d+)(:|：|-)(\S+))`)
+	enumKVRE   = regexp.MustCompile(`(\d+)(:|：|-)(\S+)`)
+)
+
+// tryParseEnumFromComment 将以下格式的注释解析为枚举信息，当前只支持数字枚举
+// 任务状态 1-待处理 2-处理中 3-成功 4-失败
+// 任务状态 1：待处理 2：处理中 3：成功 4：失败
+// 任务状态 1:待处理 2:处理中 3:成功 4:失败
+func (*DefaultMetaCenter) tryParseEnumFromComment(comment string) (string, map[string]string) {
+	res := enumNameRE.FindAllStringSubmatch(comment, 1)
+	if len(res) == 0 {
+		return comment, nil
+	}
+	name := res[0][1]
+	res = enumKVRE.FindAllStringSubmatch(comment, -1)
+	if len(res) == 0 {
+		return name, nil
+	}
+	kv := make(map[string]string)
+	for _, subRes := range res {
+		kv[subRes[1]] = subRes[3]
+	}
+	return name, kv
 }
 
 func (*DefaultMetaCenter) parseMySQLDDLTable(stmt *ast.CreateTableStmt) *Table {
