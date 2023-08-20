@@ -71,16 +71,18 @@ func TestDefaultMetaCenter_GenerateGoFiles(t *testing.T) {
 								ID:    1,
 								Name:  "id",
 								CName: "自增ID",
+								Type:  3,
 							},
 							{
 								ID:     2,
 								Name:   "task_status",
 								CName:  "任务状态",
 								EnumID: 1,
+								Type:   1,
 								Enum: &Enum{
 									ID:         1,
 									CName:      "通用状态",
-									DataTypeID: 1,
+									DataTypeID: 3,
 									Values: []*EnumValue{
 										{
 											ID:     1,
@@ -110,11 +112,12 @@ func TestDefaultMetaCenter_GenerateGoFiles(t *testing.T) {
 								ID:     3,
 								Name:   "phase",
 								CName:  "测试任务阶段",
+								Type:   1,
 								EnumID: 2,
 								Enum: &Enum{
 									ID:         2,
 									CName:      "任务阶段",
-									DataTypeID: 1,
+									DataTypeID: 2,
 									Values: []*EnumValue{
 										{
 											ID:     4,
@@ -140,6 +143,12 @@ func TestDefaultMetaCenter_GenerateGoFiles(t *testing.T) {
 									},
 								},
 							},
+							{
+								ID:    4,
+								Name:  "operator",
+								CName: "操作人",
+								Type:  2,
+							},
 						},
 					},
 				}
@@ -147,9 +156,12 @@ func TestDefaultMetaCenter_GenerateGoFiles(t *testing.T) {
 			defer p0.Reset()
 			p1 := gomonkey.ApplyMethodFunc(d.dataTypeGetter, "GetByID", func(ctx context.Context, id int) *DataType {
 				if id == 1 {
-					return &DataType{Name: "string"}
+					return &DataType{Name: DataTypeEnum}
 				}
-				return &DataType{Name: "int"}
+				if id == 2 {
+					return &DataType{Name: DataTypeString}
+				}
+				return &DataType{Name: DataTypeInt}
 			})
 			defer p1.Reset()
 			if err := d.GenerateGoFiles(tt.args.ctx); (err != nil) != tt.wantErr {

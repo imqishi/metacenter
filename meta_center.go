@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/iancoleman/strcase"
 	"github.com/pingcap/tidb/parser"
@@ -109,28 +110,27 @@ func (d *DefaultMetaCenter) GenerateGoFiles(ctx context.Context) error {
 
 // generateConstFile 生成常量文件
 func (d *DefaultMetaCenter) generateConstFile(ctx context.Context) error {
+	tplFileBody, err := os.ReadFile("./tpl_files/const.tpl")
+	if err != nil {
+		return err
+	}
+	tpl := template.Must(template.New("const").Parse(string(tplFileBody)))
 	tables := d.GetAllTables(ctx)
 	for _, table := range tables {
-		// 构造包名，go语言包名规范为全部小写字母且不包含下划线
-		pkgName := strings.ReplaceAll(strings.ToLower(table.Name), "_", "") + strconv.Itoa(table.ID)
-		dirPath := "./export_files/consts/" + pkgName
+		param := d.getTplParam(ctx, table)
+		dirPath := "./export_files/" + param.PkgName
 		if err := os.MkdirAll(dirPath, 0777); err != nil {
 			return err
 		}
-		fileContent := fmt.Sprintf(
-			`// Package %s 表%s的相关常量定义
-package %s
-
-`, pkgName, table.CName, pkgName)
-		// 构造表级别常量
-		fileContent = d.buildTableConsts(table, fileContent)
-		// 构造字段级别常量
-		// 构造字段英文名
-		fileContent = d.buildTableFieldConsts(table, fileContent)
-		// 构造枚举字段定义
-		fileContent = d.buildTableEnumConsts(ctx, table, fileContent)
 		filePath := path.Join(dirPath, "const.go")
-		if err := os.WriteFile(filePath, []byte(fileContent), 0777); err != nil {
+		file, err := os.Create(filePath)
+		if err != nil {
+			return err
+		}
+		if err := tpl.Execute(file, param); err != nil {
+			return err
+		}
+		if err := file.Close(); err != nil {
 			return err
 		}
 		// 通过go-fmt标准化文件
@@ -142,82 +142,109 @@ package %s
 	return nil
 }
 
-func (d *DefaultMetaCenter) buildTableEnumConsts(ctx context.Context, table *Table, fileContent string) string {
-	fileContent += `
-const (`
-	for _, field := range table.Fields {
-		if field.EnumID == 0 {
-			continue
-		}
-		fieldVarName := strcase.ToCamel(field.Name)
-		enum := field.Enum
-		fileContent += fmt.Sprintf(`
-	// %s-%s枚举定义
-`,
-			fieldVarName, enum.CName,
-		)
-		// 获取枚举值类型，是数字还是字符串，默认为字符串
-		valueTypeTpl := `"%s"`
-		dataType := d.dataTypeGetter.GetByID(ctx, enum.DataTypeID)
-		if dataType.Name == DataTypeInt {
-			valueTypeTpl = "%d"
-		}
-		enumValues := enum.Values
-		for _, enumValue := range enumValues {
-			enumValueVarName := strcase.ToCamel(enumValue.EName)
-			fileContent += fmt.Sprintf(`
-	// %s%s %s-%s
-	%s%s = `+valueTypeTpl,
-				fieldVarName, enumValueVarName, enum.CName, enumValue.Desc,
-				fieldVarName, enumValueVarName, enumValue.Value,
-			)
-		}
-		fileContent += `
-`
-	}
-	fileContent += `
-)
-`
-	return fileContent
+// TplTable 生成文件使用到的模板表参数
+type TplTable struct {
+	VarName string // TTestName
+	CName   string // 测试表
+	Name    string // t_test
 }
 
-func (*DefaultMetaCenter) buildTableFieldConsts(table *Table, fileContent string) string {
-	fileContent += `
-const (`
-	for _, field := range table.Fields {
-		fieldVarName := strcase.ToCamel(field.Name)
-		fileContent += fmt.Sprintf(`
-	// Field%s %s字段名
-	Field%s = "%s"`,
-			fieldVarName, field.CName,
-			fieldVarName, field.Name,
-		)
-	}
-	fileContent += `
-)
-`
-	return fileContent
+// TplEnumValue 生成文件使用到的模板枚举参数
+type TplEnumValue struct {
+	VarName string // Running
+	CName   string // 运行中
+	Value   string // 1
 }
 
-func (*DefaultMetaCenter) buildTableConsts(table *Table, fileContent string) string {
-	tableVarName := strcase.ToCamel(table.Name)
-	fileContent += fmt.Sprintf(
-		`const (
-	// Table%sName %s表名
-	Table%sName = "%s"
-	// Table%sCName %s表中文名
-	Table%sCName = "%s"`,
-		tableVarName, table.CName, tableVarName, table.Name,
-		tableVarName, table.Name, tableVarName, table.CName,
-	)
-	fileContent += `
-)
-`
-	return fileContent
+// TplField 生成文件使用到的模板字段参数
+type TplField struct {
+	VarName    string // Status
+	Type       string // int
+	Name       string // status
+	CName      string // 状态
+	IsEnum     bool   // true
+	IsNum      bool   // true
+	EnumValues []TplEnumValue
+}
+
+// TplParam 生成文件使用到的模板参数
+type TplParam struct {
+	PkgName string
+	Table   TplTable
+	Fields  []TplField
+	HasEnum bool
+}
+
+func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table) *TplParam {
+	// 构造包名，go语言包名规范为全部小写字母且不包含下划线，避免有重名表，增加id后缀
+	pkgName := strings.ReplaceAll(strings.ToLower(table.Name), "_", "") + strconv.Itoa(table.ID)
+	param := &TplParam{
+		PkgName: pkgName,
+		Table: TplTable{
+			VarName: strcase.ToCamel(table.Name),
+			CName:   table.CName,
+			Name:    table.Name,
+		},
+	}
+	for _, field := range table.Fields {
+		fieldVarName := strcase.ToCamel(field.Name)
+		dataType := d.dataTypeGetter.GetByID(ctx, field.Type)
+		tplField := TplField{
+			VarName: fieldVarName,
+			Type:    dataType.Name,
+			Name:    field.Name,
+			CName:   field.CName,
+			IsEnum:  false,
+		}
+		if dataType.Name == DataTypeEnum {
+			param.HasEnum = true
+			tplField.Type = d.dataTypeGetter.GetByID(ctx, field.Enum.DataTypeID).Name
+			tplField.IsEnum = true
+			tplField.IsNum = tplField.Type == DataTypeInt
+			for _, enumValue := range field.Enum.Values {
+				tplField.EnumValues = append(tplField.EnumValues, TplEnumValue{
+					VarName: strcase.ToCamel(enumValue.EName),
+					CName:   enumValue.Desc,
+					Value:   enumValue.Value,
+				})
+			}
+		}
+		param.Fields = append(param.Fields, tplField)
+	}
+	return param
 }
 
 // generateModelFile 生成model文件
 func (d *DefaultMetaCenter) generateModelFile(ctx context.Context) error {
+	tplFileBody, err := os.ReadFile("./tpl_files/model.tpl")
+	if err != nil {
+		return err
+	}
+	tpl := template.Must(template.New("model").Parse(string(tplFileBody)))
+	tables := d.GetAllTables(ctx)
+	for _, table := range tables {
+		param := d.getTplParam(ctx, table)
+		dirPath := "./export_files/" + param.PkgName
+		if err := os.MkdirAll(dirPath, 0777); err != nil {
+			return err
+		}
+		filePath := path.Join(dirPath, "model.go")
+		file, err := os.Create(filePath)
+		if err != nil {
+			return err
+		}
+		if err := tpl.Execute(file, param); err != nil {
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+		// 通过go-fmt标准化文件
+		goFmtCmd := exec.CommandContext(ctx, "go", "fmt", filePath)
+		if err := goFmtCmd.Run(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -278,7 +305,6 @@ func (d *DefaultMetaCenter) parseMySQLDDLField(ctx context.Context, col *ast.Col
 			option.Expr.Format(buf)
 			comment := strings.Trim(buf.String(), `"`)
 			name, enumKV := d.tryParseEnumFromComment(comment)
-			fmt.Println(comment, name, enumKV)
 			field.CName = name
 			if len(enumKV) == 0 {
 				continue
