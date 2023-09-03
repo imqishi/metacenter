@@ -4,14 +4,32 @@ import "context"
 
 // Table 表基础信息
 type Table struct {
-	ID      int    `json:"id"`
-	Name    string `json:"name"`
-	CName   string `json:"cname"`
-	DBDsn   string `json:"db_dsn"`
-	ESDsn   string `json:"es_dsn"`
-	ESIndex string `json:"es_index"`
-	ESSync  int    `json:"es_sync"`
-
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	CName    string `json:"cname"`
+	DBConfig struct {
+		Address       string `json:"address"`
+		WriteUser     string `json:"write_user"`
+		WritePassword string `json:"write_password"`
+		ReadUser      string `json:"read_user"`
+		ReadPassword  string `json:"read_password"`
+		Charset       string `json:"charset"`
+	} `json:"db_config"`
+	ESConfig struct {
+		Address  string `json:"address"`
+		User     string `json:"user"`
+		Password string `json:"password"`
+		Index    struct {
+			NameOrPrefix     string `json:"name_or_prefix"`
+			MultiIndex       bool   `json:"multi_index"`
+			IndexFieldID     int    `json:"index_field_id"`
+			IndexMode        int    `json:"index_mode"`
+			MaxResultWindow  int    `json:"max_result_window"`
+			NumberOfShards   int    `json:"number_of_shards"`
+			NumberOfReplicas int    `json:"number_of_replicas"`
+		} `json:"index"`
+		Sync int `json:"sync"`
+	} `json:"es_config"`
 	Fields     []*Field          `json:"-"`
 	NameFields map[string]*Field `json:"-"`
 }

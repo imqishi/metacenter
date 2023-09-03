@@ -3,6 +3,7 @@ package metacenter
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,6 +32,8 @@ type MetaCenter interface {
 	GenerateGoFiles(ctx context.Context) error
 	// ParseFromMySQLDDL 将MySQL-DDL语句转化为定义的meta结构
 	ParseFromMySQLDDL(ctx context.Context, ddl string) (*Table, error)
+	// ToESTemplate 将Table转换为es模板
+	ToESTemplate(ctx context.Context, table *Table) (string, error)
 }
 
 // DefaultMetaCenter 默认实现
@@ -200,7 +203,7 @@ func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table) *TplP
 			param.HasEnum = true
 			tplField.Type = d.dataTypeGetter.GetByID(ctx, field.Enum.DataTypeID).Name
 			tplField.IsEnum = true
-			tplField.IsNum = tplField.Type == DataTypeInt
+			tplField.IsNum = tplField.Type == DataTypeInt || tplField.Type == DataTypeUInt
 			for _, enumValue := range field.Enum.Values {
 				tplField.EnumValues = append(tplField.EnumValues, TplEnumValue{
 					VarName: strcase.ToCamel(enumValue.EName),
@@ -366,4 +369,85 @@ func (*DefaultMetaCenter) parseMySQLDDLTable(stmt *ast.CreateTableStmt) *Table {
 		}
 	}
 	return ret
+}
+
+// ESTemplate es模板配置
+type ESTemplate struct {
+	IndexPatterns []string `json:"index_patterns"`
+	Template      struct {
+		Settings struct {
+			MaxResultWindow  int `json:"max_result_window"`
+			NumberOfShards   int `json:"number_of_shards"`
+			NumberOfReplicas int `json:"number_of_replicas"`
+		} `json:"settings"`
+		Mappings struct {
+			Source struct {
+				Enabled bool `json:"enabled"`
+			} `json:"_source"`
+			Properties map[string]interface{} `json:"properties"`
+		} `json:"mappings"`
+	} `json:"template"`
+	Priority int `json:"priority"`
+	Version  int `json:"version"`
+}
+
+// ToESTemplate 将Table转换为es模板
+func (d *DefaultMetaCenter) ToESTemplate(ctx context.Context, table *Table) (string, error) {
+	tpl := ESTemplate{}
+	indexConfig := table.ESConfig.Index
+	tpl.IndexPatterns = []string{indexConfig.NameOrPrefix}
+	if indexConfig.MultiIndex {
+		tpl.IndexPatterns = []string{indexConfig.NameOrPrefix + "*"}
+	}
+	if indexConfig.MaxResultWindow != 0 {
+		tpl.Template.Settings.MaxResultWindow = indexConfig.MaxResultWindow
+	}
+	tpl.Template.Settings.NumberOfShards = 3
+	if indexConfig.NumberOfShards != 0 {
+		tpl.Template.Settings.NumberOfShards = indexConfig.NumberOfShards
+	}
+	if indexConfig.NumberOfReplicas != 0 {
+		tpl.Template.Settings.NumberOfReplicas = indexConfig.NumberOfReplicas
+	}
+	tpl.Template.Mappings.Source.Enabled = true
+	for _, field := range table.Fields {
+		var fieldMapping map[string]interface{}
+		typeName := d.dataTypeGetter.GetByID(ctx, field.Type).Name
+		switch typeName {
+		case DataTypeInt:
+			fieldMapping = map[string]interface{}{"type": "long"}
+		case DataTypeUInt:
+			fieldMapping = map[string]interface{}{"type": "unsigned_long"}
+		case DataTypeFloat:
+			fieldMapping = map[string]interface{}{"type": "double"}
+		case DataTypeDateTime:
+			fieldMapping = map[string]interface{}{
+				"type": "date", "format": "yyyy-MM-dd HH:mm:ss", "ignore_malformed": true}
+		case DataTypeEnum:
+			fieldMapping = map[string]interface{}{"type": "keyword"}
+			enumTypeName := d.dataTypeGetter.GetByID(ctx, field.Enum.DataTypeID).Name
+			if enumTypeName == DataTypeInt || enumTypeName == DataTypeUInt {
+				fieldMapping = map[string]interface{}{"type": "long"}
+			}
+		case DataTypeJSON:
+			fieldMapping = map[string]interface{}{"type": "nested"}
+		default:
+			fieldMapping = map[string]interface{}{"type": "keyword"}
+			if field.ESFieldType == "text" {
+				fieldMapping = map[string]interface{}{
+					"type":            "text",
+					"search_analyzer": "ik_smart",
+					"analyzer":        "ik_max_word",
+					"fields": map[string]interface{}{
+						"keyword": map[string]interface{}{
+							"type": "keyword",
+						},
+					},
+				}
+			}
+		}
+		tpl.Template.Mappings.Properties[field.Name] = fieldMapping
+	}
+	body, _ := json.Marshal(tpl)
+	return string(body), nil
 }
