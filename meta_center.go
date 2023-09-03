@@ -301,7 +301,8 @@ func (d *DefaultMetaCenter) parseMySQLDDLField(ctx context.Context, col *ast.Col
 	default:
 		field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeString).ID
 	}
-	// 解析字段注释，尝试解析字段的中文名，以及如果有枚举值解析为枚举类型
+	// 解析字段注释，尝试解析字段的中文名
+	// 以及如果有枚举值解析为枚举类型，否则如果是字符串类型且包含JSON字样解析为JSON
 	for _, option := range col.Options {
 		if option.Tp == ast.ColumnOptionComment {
 			buf := bytes.NewBuffer(nil)
@@ -310,6 +311,10 @@ func (d *DefaultMetaCenter) parseMySQLDDLField(ctx context.Context, col *ast.Col
 			name, enumKV := d.tryParseEnumFromComment(comment)
 			field.CName = name
 			if len(enumKV) == 0 {
+				if field.Type == d.dataTypeGetter.GetByName(ctx, DataTypeString).ID &&
+					d.tryParseJSONFromComment(comment) {
+					field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeJSON).ID
+				}
 				continue
 			}
 			field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeEnum).ID
@@ -331,6 +336,11 @@ func (d *DefaultMetaCenter) parseMySQLDDLField(ctx context.Context, col *ast.Col
 		field.CName = field.Name
 	}
 	return field
+}
+
+func (*DefaultMetaCenter) tryParseJSONFromComment(comment string) bool {
+	lowerComment := strings.ToLower(comment)
+	return strings.Contains(lowerComment, "json")
 }
 
 var (
