@@ -9,16 +9,40 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
-	"strconv"
 	"strings"
 	"text/template"
 
 	"github.com/iancoleman/strcase"
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/parser/ast"
-	"github.com/pingcap/tidb/parser/types"
 	_ "github.com/pingcap/tidb/types/parser_driver"
 )
+
+// GenerateGoFilesParam 生成Go模板文件可指定的参数
+type GenerateGoFilesParam struct {
+	// Name 输出文件类型，如model/dao/const...
+	Name string
+	// TplFilePath 模板文件路径
+	TplFilePath string
+	// OutputDirPath 输出文件夹路径
+	OutputDirPath string
+	// InjectParams 注入任意额外参数
+	InjectParams map[string]string
+}
+
+// Fmt 格式化参数
+func (p *GenerateGoFilesParam) Fmt() error {
+	if p.Name == "" {
+		return fmt.Errorf("param Name cannot be empty")
+	}
+	if p.OutputDirPath == "" {
+		p.OutputDirPath = "./default"
+	}
+	if p.OutputDirPath[len(p.OutputDirPath)-1] == '/' {
+		p.OutputDirPath = p.OutputDirPath[:len(p.OutputDirPath)-1]
+	}
+	return nil
+}
 
 // MetaCenter 元信息中心接口
 type MetaCenter interface {
@@ -29,7 +53,7 @@ type MetaCenter interface {
 	// GetAllTables 获取所有表配置
 	GetAllTables(ctx context.Context) []*Table
 	// GenerateGoFiles 生成go文件
-	GenerateGoFiles(ctx context.Context) error
+	GenerateGoFiles(ctx context.Context, params []*GenerateGoFilesParam) error
 	// ParseFromMySQLDDL 将MySQL-DDL语句转化为定义的meta结构
 	ParseFromMySQLDDL(ctx context.Context, ddl string) (*Table, error)
 	// ToESTemplate 将Table转换为es模板
@@ -98,48 +122,37 @@ func (d *DefaultMetaCenter) GetAllTables(ctx context.Context) []*Table {
 }
 
 // GenerateGoFiles 生成go文件
-func (d *DefaultMetaCenter) GenerateGoFiles(ctx context.Context) error {
-	if err := d.generateConstFile(ctx); err != nil {
-		return err
-	}
-	if err := d.generateModelFile(ctx); err != nil {
-		return err
-	}
-	if err := d.generateDAOFile(ctx); err != nil {
-		return err
-	}
-	return nil
-}
-
-// generateConstFile 生成常量文件
-func (d *DefaultMetaCenter) generateConstFile(ctx context.Context) error {
-	tplFileBody, err := os.ReadFile("./tpl_files/const.tpl")
-	if err != nil {
-		return err
-	}
-	tpl := template.Must(template.New("const").Parse(string(tplFileBody)))
-	tables := d.GetAllTables(ctx)
-	for _, table := range tables {
-		param := d.getTplParam(ctx, table)
-		dirPath := "./export_files/" + param.PkgName
-		if err := os.MkdirAll(dirPath, 0777); err != nil {
+func (d *DefaultMetaCenter) GenerateGoFiles(ctx context.Context, tables []*Table, params []*GenerateGoFilesParam) error {
+	for _, param := range params {
+		if err := param.Fmt(); err != nil {
 			return err
 		}
-		filePath := path.Join(dirPath, "const.go")
-		file, err := os.Create(filePath)
+		tplFileBody, err := os.ReadFile(param.TplFilePath)
 		if err != nil {
 			return err
 		}
-		if err := tpl.Execute(file, param); err != nil {
-			return err
-		}
-		if err := file.Close(); err != nil {
-			return err
-		}
-		// 通过go-fmt标准化文件
-		goFmtCmd := exec.CommandContext(ctx, "go", "fmt", filePath)
-		if err := goFmtCmd.Run(); err != nil {
-			return err
+		tpl := template.Must(template.New(param.Name).Parse(string(tplFileBody)))
+		for _, table := range tables {
+			tplParam := d.getTplParam(ctx, table, param)
+			if err := os.MkdirAll(param.OutputDirPath, 0777); err != nil {
+				return err
+			}
+			filePath := path.Join(param.OutputDirPath, fmt.Sprintf("%s_%s.go", table.Name, param.Name))
+			file, err := os.Create(filePath)
+			if err != nil {
+				return err
+			}
+			if err := tpl.Execute(file, tplParam); err != nil {
+				return err
+			}
+			if err := file.Close(); err != nil {
+				return err
+			}
+			// 通过go-fmt标准化文件
+			goFmtCmd := exec.CommandContext(ctx, "go", "fmt", filePath)
+			if err := goFmtCmd.Run(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -172,22 +185,23 @@ type TplField struct {
 
 // TplParam 生成文件使用到的模板参数
 type TplParam struct {
-	PkgName string
-	Table   TplTable
-	Fields  []TplField
-	HasEnum bool
+	PkgName      string
+	Table        TplTable
+	Fields       []TplField
+	HasEnum      bool
+	InjectParams map[string]string
 }
 
-func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table) *TplParam {
-	// 构造包名，go语言包名规范为全部小写字母且不包含下划线，避免有重名表，增加id后缀
-	pkgName := strings.ReplaceAll(strings.ToLower(table.Name), "_", "") + strconv.Itoa(table.ID)
+func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table, genParam *GenerateGoFilesParam) *TplParam {
 	param := &TplParam{
-		PkgName: pkgName,
+		// 包名为输出文件夹同名
+		PkgName: path.Base(genParam.OutputDirPath),
 		Table: TplTable{
 			VarName: strcase.ToCamel(table.Name),
 			CName:   table.CName,
 			Name:    table.Name,
 		},
+		InjectParams: genParam.InjectParams,
 	}
 	for _, field := range table.Fields {
 		fieldVarName := strcase.ToCamel(field.Name)
@@ -197,13 +211,13 @@ func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table) *TplP
 			Type:    dataType.Name,
 			Name:    field.Name,
 			CName:   field.CName,
+			IsNum:   dataType.IsNum,
 			IsEnum:  false,
 		}
 		if dataType.Name == DataTypeEnum {
 			param.HasEnum = true
-			tplField.Type = d.dataTypeGetter.GetByID(ctx, field.Enum.DataTypeID).Name
 			tplField.IsEnum = true
-			tplField.IsNum = tplField.Type == DataTypeInt || tplField.Type == DataTypeUInt
+			tplField.Type = d.dataTypeGetter.GetByID(ctx, field.Enum.DataTypeID).Name
 			for _, enumValue := range field.Enum.Values {
 				tplField.EnumValues = append(tplField.EnumValues, TplEnumValue{
 					VarName: strcase.ToCamel(enumValue.EName),
@@ -215,45 +229,6 @@ func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table) *TplP
 		param.Fields = append(param.Fields, tplField)
 	}
 	return param
-}
-
-// generateModelFile 生成model文件
-func (d *DefaultMetaCenter) generateModelFile(ctx context.Context) error {
-	tplFileBody, err := os.ReadFile("./tpl_files/model.tpl")
-	if err != nil {
-		return err
-	}
-	tpl := template.Must(template.New("model").Parse(string(tplFileBody)))
-	tables := d.GetAllTables(ctx)
-	for _, table := range tables {
-		param := d.getTplParam(ctx, table)
-		dirPath := "./export_files/" + param.PkgName
-		if err := os.MkdirAll(dirPath, 0777); err != nil {
-			return err
-		}
-		filePath := path.Join(dirPath, "model.go")
-		file, err := os.Create(filePath)
-		if err != nil {
-			return err
-		}
-		if err := tpl.Execute(file, param); err != nil {
-			return err
-		}
-		if err := file.Close(); err != nil {
-			return err
-		}
-		// 通过go-fmt标准化文件
-		goFmtCmd := exec.CommandContext(ctx, "go", "fmt", filePath)
-		if err := goFmtCmd.Run(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// generateDAOFile 生成dao文件
-func (d *DefaultMetaCenter) generateDAOFile(ctx context.Context) error {
-	return nil
 }
 
 // ParseFromMySQLDDL 将MySQL-DDL语句转化为定义的meta结构
@@ -285,22 +260,20 @@ func (d *DefaultMetaCenter) ParseFromMySQLDDL(ctx context.Context, ddl string) (
 	return ret, nil
 }
 
+var mysqlTypeRE = regexp.MustCompile(`^(\w+)\(\d+\)$`)
+
 func (d *DefaultMetaCenter) parseMySQLDDLField(ctx context.Context, col *ast.ColumnDef) *Field {
 	// 解析字段英文名
 	field := &Field{
 		Name: col.Name.Name.O,
 	}
 	// 解析字段类型
-	switch col.Tp.EvalType() {
-	case types.ETInt:
-		field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeInt).ID
-	case types.ETDecimal:
-		field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeFloat).ID
-	case types.ETDatetime:
-		field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeDateTime).ID
-	default:
-		field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeString).ID
+	tp := col.Tp.CompactStr() // int(11)
+	matches := mysqlTypeRE.FindStringSubmatch(tp)
+	if len(matches) > 1 {
+		tp = matches[1]
 	}
+	field.Type = d.dataTypeGetter.GetByName(ctx, tp).ID
 	// 解析字段注释，尝试解析字段的中文名
 	// 以及如果有枚举值解析为枚举类型，否则如果是字符串类型且包含JSON字样解析为JSON
 	for _, option := range col.Options {
