@@ -180,6 +180,7 @@ type TplField struct {
 	CName      string // 状态
 	IsEnum     bool   // true
 	IsNum      bool   // true
+	IsPK       bool   // true
 	EnumValues []TplEnumValue
 }
 
@@ -212,6 +213,7 @@ func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table, genPa
 			Name:    field.Name,
 			CName:   field.CName,
 			IsNum:   dataType.IsNum,
+			IsPK:    field.IsPK,
 			IsEnum:  false,
 		}
 		if dataType.Name == DataTypeEnum {
@@ -231,8 +233,11 @@ func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table, genPa
 	return param
 }
 
+var fmtMySQLDDLRE = regexp.MustCompile(`shardkey=.*`)
+
 // ParseFromMySQLDDL 将MySQL-DDL语句转化为定义的meta结构
 func (d *DefaultMetaCenter) ParseFromMySQLDDL(ctx context.Context, ddl string) (*Table, error) {
+	ddl = fmtMySQLDDLRE.ReplaceAllString(ddl, "")
 	p := parser.New()
 	stmts, _, err := p.ParseSQL(ddl)
 	if err != nil {
@@ -245,18 +250,24 @@ func (d *DefaultMetaCenter) ParseFromMySQLDDL(ctx context.Context, ddl string) (
 	if !ok {
 		return nil, fmt.Errorf("parse ddl fail, not ast.CreateTableStmt")
 	}
+	// 获取PK信息
+	pkFields := make(map[string]bool)
+	for _, constraint := range stmt.Constraints {
+		if constraint.Tp != ast.ConstraintPrimaryKey {
+			continue
+		}
+		for _, key := range constraint.Keys {
+			pkFields[key.Column.Name.O] = true
+		}
+	}
 	ret := d.parseMySQLDDLTable(stmt)
 	for _, col := range stmt.Cols {
 		field := d.parseMySQLDDLField(ctx, col)
+		if pkFields[field.Name] {
+			field.IsPK = true
+		}
 		ret.Fields = append(ret.Fields, field)
 	}
-	// for _, constraint := range stmt.Constraints {
-	// 	fmt.Println(constraint.Tp) // PK
-	// 	for _, key := range constraint.Keys {
-	// 		fmt.Println(key.Column)
-	// 	}
-	// 	fmt.Println("------")
-	// }
 	return ret, nil
 }
 

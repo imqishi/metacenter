@@ -18,6 +18,8 @@ type Field struct {
 	ESFieldType string `json:"es_field_type"`
 	// Explain 备注
 	Explain string `json:"explain"`
+	// IsPK 是否主键
+	IsPK bool `json:"is_pk"`
 
 	Enum *Enum `json:"-"`
 }
