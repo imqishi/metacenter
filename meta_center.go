@@ -70,6 +70,51 @@ type DefaultMetaCenter struct {
 	dataTypeGetter   DataTypeGetter
 }
 
+// DefaultMetaCenterOption 可选参数
+type DefaultMetaCenterOption func(*DefaultMetaCenter)
+
+// WithTableGetter 指定TableGetter
+func WithTableGetter(tg TableGetter) DefaultMetaCenterOption {
+	return func(dm *DefaultMetaCenter) {
+		dm.tableGetter = tg
+	}
+}
+
+// WithTableFieldGetter 指定TableFieldGetter
+func WithTableFieldGetter(tfg TableFieldGetter) DefaultMetaCenterOption {
+	return func(dm *DefaultMetaCenter) {
+		dm.tableFieldGetter = tfg
+	}
+}
+
+// WithFieldGetter 指定FieldGetter
+func WithFieldGetter(fg FieldGetter) DefaultMetaCenterOption {
+	return func(dm *DefaultMetaCenter) {
+		dm.fieldGetter = fg
+	}
+}
+
+// WithEnumGetter 指定EnumGetter
+func WithEnumGetter(eg EnumGetter) DefaultMetaCenterOption {
+	return func(dm *DefaultMetaCenter) {
+		dm.enumGetter = eg
+	}
+}
+
+// WithEnumValueGetter 指定EnumValueGetter
+func WithEnumValueGetter(evg EnumValueGetter) DefaultMetaCenterOption {
+	return func(dm *DefaultMetaCenter) {
+		dm.enumValueGetter = evg
+	}
+}
+
+// WithDataTypeGetter 指定DataTypeGetter
+func WithDataTypeGetter(dtg DataTypeGetter) DefaultMetaCenterOption {
+	return func(dm *DefaultMetaCenter) {
+		dm.dataTypeGetter = dtg
+	}
+}
+
 // NewDefaultMetaCenter 实例化默认元信息中心
 func NewDefaultMetaCenter(ctx context.Context) *DefaultMetaCenter {
 	return &DefaultMetaCenter{}
