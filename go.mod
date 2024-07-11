@@ -7,6 +7,7 @@ require (
 	github.com/iancoleman/strcase v0.3.0
 	github.com/pingcap/tidb v1.1.0-beta.0.20211124132551-4a1b2e9fe5b5
 	github.com/pingcap/tidb/parser v0.0.0-20211124132551-4a1b2e9fe5b5
+	github.com/pkg/errors v0.9.1
 )
 
 require (
@@ -29,7 +30,6 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20211029081837-3c7bd947cf9b // indirect
 	github.com/pingcap/log v0.0.0-20210906054005-afc726e70354 // indirect
 	github.com/pingcap/tipb v0.0.0-20211105090418-71142a4d40e3 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.5.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.9.1 // indirect

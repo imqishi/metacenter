@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"text/template"
@@ -16,6 +17,7 @@ import (
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/parser/ast"
 	_ "github.com/pingcap/tidb/types/parser_driver"
+	"github.com/pkg/errors"
 )
 
 // GenerateGoFilesParam 生成Go模板文件可指定的参数
@@ -116,8 +118,12 @@ func WithDataTypeGetter(dtg DataTypeGetter) DefaultMetaCenterOption {
 }
 
 // NewDefaultMetaCenter 实例化默认元信息中心
-func NewDefaultMetaCenter(ctx context.Context) *DefaultMetaCenter {
-	return &DefaultMetaCenter{}
+func NewDefaultMetaCenter(ctx context.Context, opts ...DefaultMetaCenterOption) *DefaultMetaCenter {
+	center := &DefaultMetaCenter{}
+	for _, opt := range opts {
+		opt(center)
+	}
+	return center
 }
 
 // GetTableByName 根据表名获取配置
@@ -170,33 +176,37 @@ func (d *DefaultMetaCenter) GetAllTables(ctx context.Context) []*Table {
 func (d *DefaultMetaCenter) GenerateGoFiles(ctx context.Context, tables []*Table, params []*GenerateGoFilesParam) error {
 	for _, param := range params {
 		if err := param.Fmt(); err != nil {
-			return err
+			return errors.Wrapf(err, "param check fail")
 		}
 		tplFileBody, err := os.ReadFile(param.TplFilePath)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "read TplFilePath(%s) fail", param.TplFilePath)
 		}
 		tpl := template.Must(template.New(param.Name).Parse(string(tplFileBody)))
 		for _, table := range tables {
 			tplParam := d.getTplParam(ctx, table, param)
 			if err := os.MkdirAll(param.OutputDirPath, 0777); err != nil {
-				return err
+				return errors.Wrapf(err, "mkdir(%s) fail", param.OutputDirPath)
 			}
 			filePath := path.Join(param.OutputDirPath, fmt.Sprintf("%s_%s.go", table.Name, param.Name))
+			filePath, err := filepath.Abs(filePath)
+			if err != nil {
+				return errors.Wrapf(err, "create file abs path(%s) fail", filePath)
+			}
 			file, err := os.Create(filePath)
 			if err != nil {
-				return err
+				return errors.Wrapf(err, "create file(%s) fail", filePath)
 			}
 			if err := tpl.Execute(file, tplParam); err != nil {
-				return err
+				return errors.Wrapf(err, "tpl(%s) execute fail", param.TplFilePath)
 			}
 			if err := file.Close(); err != nil {
-				return err
+				return errors.Wrapf(err, "gen file(%s) close fail", param.TplFilePath)
 			}
 			// 通过go-fmt标准化文件
 			goFmtCmd := exec.CommandContext(ctx, "go", "fmt", filePath)
 			if err := goFmtCmd.Run(); err != nil {
-				return err
+				return errors.Wrapf(err, "go fmt file(%s) fail", filePath)
 			}
 		}
 	}
