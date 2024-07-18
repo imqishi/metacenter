@@ -271,7 +271,8 @@ func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table, genPa
 			IsPK:    field.IsPK,
 			IsEnum:  false,
 		}
-		if dataType.Name == DataTypeEnum {
+		fmt.Println(field.Name, field.Enum)
+		if field.Enum != nil {
 			param.HasEnum = true
 			tplField.IsEnum = true
 			tplField.Type = d.dataTypeGetter.GetByID(ctx, field.Enum.DataTypeID).Name
@@ -356,10 +357,9 @@ func (d *DefaultMetaCenter) parseMySQLDDLField(ctx context.Context, col *ast.Col
 				}
 				continue
 			}
-			field.Type = d.dataTypeGetter.GetByName(ctx, DataTypeEnum).ID
 			field.Enum = &Enum{
 				CName:      name,
-				DataTypeID: d.dataTypeGetter.GetByName(ctx, DataTypeInt).ID,
+				DataTypeID: field.Type,
 			}
 			for k, v := range enumKV {
 				field.Enum.Values = append(field.Enum.Values, &EnumValue{
