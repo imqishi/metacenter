@@ -236,6 +236,7 @@ type TplField struct {
 	IsEnum     bool   // true
 	IsNum      bool   // true
 	IsPK       bool   // true
+	AutoIncr   bool   // false
 	EnumValues []TplEnumValue
 }
 
@@ -263,15 +264,15 @@ func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table, genPa
 		fieldVarName := strcase.ToCamel(field.Name)
 		dataType := d.dataTypeGetter.GetByID(ctx, field.Type)
 		tplField := TplField{
-			VarName: fieldVarName,
-			Type:    dataType.Name,
-			Name:    field.Name,
-			CName:   field.CName,
-			IsNum:   dataType.IsNum,
-			IsPK:    field.IsPK,
-			IsEnum:  false,
+			VarName:  fieldVarName,
+			Type:     dataType.Name,
+			Name:     field.Name,
+			CName:    field.CName,
+			IsNum:    dataType.IsNum,
+			IsPK:     field.IsPK,
+			AutoIncr: field.AutoIncr,
+			IsEnum:   false,
 		}
-		fmt.Println(field.Name, field.Enum)
 		if field.Enum != nil {
 			param.HasEnum = true
 			tplField.IsEnum = true
@@ -319,8 +320,14 @@ func (d *DefaultMetaCenter) ParseFromMySQLDDL(ctx context.Context, ddl string) (
 	ret := d.parseMySQLDDLTable(stmt)
 	for _, col := range stmt.Cols {
 		field := d.parseMySQLDDLField(ctx, col)
+		// 补充pk以及autoincr信息
 		if pkFields[field.Name] {
 			field.IsPK = true
+		}
+		for _, colOpt := range col.Options {
+			if colOpt.Tp == ast.ColumnOptionAutoIncrement {
+				field.AutoIncr = true
+			}
 		}
 		ret.Fields = append(ret.Fields, field)
 	}

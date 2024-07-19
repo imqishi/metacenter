@@ -20,6 +20,8 @@ type Field struct {
 	Explain string `json:"explain"`
 	// IsPK 是否主键
 	IsPK bool `json:"is_pk"`
+	// AutoIncr 是否自增
+	AutoIncr bool `json:"auto_incr"`
 
 	Enum *Enum `json:"-"`
 }
