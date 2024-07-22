@@ -245,6 +245,7 @@ type TplParam struct {
 	PkgName      string
 	Table        TplTable
 	Fields       []TplField
+	PKFields     []TplField
 	HasEnum      bool
 	InjectParams map[string]string
 }
@@ -286,6 +287,9 @@ func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table, genPa
 			}
 		}
 		param.Fields = append(param.Fields, tplField)
+		if field.IsPK {
+			param.PKFields = append(param.PKFields, tplField)
+		}
 	}
 	return param
 }
