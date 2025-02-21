@@ -247,6 +247,7 @@ type TplParam struct {
 	Fields       []TplField
 	PKFields     []TplField
 	HasEnum      bool
+	HasDecimal   bool
 	InjectParams map[string]string
 }
 
@@ -285,6 +286,9 @@ func (d *DefaultMetaCenter) getTplParam(ctx context.Context, table *Table, genPa
 					Value:   enumValue.Value,
 				})
 			}
+		}
+		if dataType.Name == goDecimalType {
+			param.HasDecimal = true
 		}
 		param.Fields = append(param.Fields, tplField)
 		if field.IsPK {

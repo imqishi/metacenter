@@ -136,6 +136,8 @@ func (d *GolangDataTypeGetter) GetByID(ctx context.Context, id int) *DataType {
 	return golangDataType[id]
 }
 
+const goDecimalType = "decimal.Decimal"
+
 var golangDataType = []*DataType{
 	{},
 	{
@@ -180,7 +182,7 @@ var golangDataType = []*DataType{
 	},
 	{
 		ID:    8,
-		Name:  "decimal.Decimal",
+		Name:  goDecimalType,
 		CName: "小数",
 	},
 }
