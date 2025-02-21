@@ -178,6 +178,11 @@ var golangDataType = []*DataType{
 		Name:  "utils.DateTime",
 		CName: "时间",
 	},
+	{
+		ID:    8,
+		Name:  "decimal.Decimal",
+		CName: "小数",
+	},
 }
 
 var golangDataTypeMap map[string]*DataType
@@ -201,6 +206,9 @@ func (d *GolangDataTypeGetter) GetByName(ctx context.Context, name string) *Data
 	}
 	if strings.Contains(name, "time") {
 		return golangDataType[7]
+	}
+	if strings.Contains(name, "decimal") {
+		return golangDataType[8]
 	}
 	return golangDataType[6]
 }
