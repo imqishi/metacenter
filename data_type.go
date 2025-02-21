@@ -184,6 +184,7 @@ var golangDataType = []*DataType{
 		ID:    8,
 		Name:  goDecimalType,
 		CName: "小数",
+		IsNum: true,
 	},
 }
 
