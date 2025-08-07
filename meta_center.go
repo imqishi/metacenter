@@ -379,7 +379,7 @@ func (d *DefaultMetaCenter) parseMySQLDDLField(ctx context.Context, col *ast.Col
 			for k, v := range enumKV {
 				field.Enum.Values = append(field.Enum.Values, &EnumValue{
 					EnumID: field.Enum.ID,
-					EName:  strcase.ToCamel(field.Name) + k,
+					EName:  strcase.ToCamel(field.Name) + strcase.ToCamel(k),
 					Desc:   v,
 					Value:  k,
 				})
@@ -398,8 +398,14 @@ func (*DefaultMetaCenter) tryParseJSONFromComment(comment string) bool {
 }
 
 var (
-	enumNameRE = regexp.MustCompile(`(\S+)(\s+(\d+)(:|：|-)(\S+))`)
-	enumKVRE   = regexp.MustCompile(`(\d+)(:|：|-)(\S+)`)
+	// firstLevelEnumParseRE 提取名称和枚举部分
+	firstLevelEnumParseRE = regexp.MustCompile(`^(.*?)\s+(.*)$`)
+	// secondLevelEnumDashRE 尝试匹配格式：1-待处理 2-处理中 等 或 A-选项A B-选项B 等
+	secondLevelEnumDashRE = regexp.MustCompile(`(\w+)-([^\s]+)`)
+	// secondLevelEnumColon1RE 尝试匹配格式：1：待处理 2：处理中 等 或 A：选项A B：选项B 等
+	secondLevelEnumColon1RE = regexp.MustCompile(`(\w+)：([^\s]+)`)
+	// secondLevelEnumColon2RE 尝试匹配格式：1:待处理 2:处理中 等 或 A:选项A B:选项B 等
+	secondLevelEnumColon2RE = regexp.MustCompile(`(\w+):([^\s]+)`)
 )
 
 // tryParseEnumFromComment 将以下格式的注释解析为枚举信息，当前只支持数字枚举
@@ -407,20 +413,39 @@ var (
 // 任务状态 1：待处理 2：处理中 3：成功 4：失败
 // 任务状态 1:待处理 2:处理中 3:成功 4:失败
 func (*DefaultMetaCenter) tryParseEnumFromComment(comment string) (string, map[string]string) {
-	res := enumNameRE.FindAllStringSubmatch(comment, 1)
-	if len(res) == 0 {
-		return comment, nil
+	comment = strings.TrimSpace(comment)
+	// 使用正则表达式提取名称和枚举部分
+	matches := firstLevelEnumParseRE.FindStringSubmatch(comment)
+	if len(matches) < 3 {
+		return comment, map[string]string{}
 	}
-	name := res[0][1]
-	res = enumKVRE.FindAllStringSubmatch(comment, -1)
-	if len(res) == 0 {
-		return name, nil
+	name := strings.TrimSpace(matches[1])
+	enumPart := matches[2]
+	// 创建枚举映射
+	enumMap := make(map[string]string)
+	var pairs [][]string
+	// 尝试不同的分隔符模式
+	if secondLevelEnumDashRE.MatchString(enumPart) {
+		pairs = secondLevelEnumDashRE.FindAllStringSubmatch(enumPart, -1)
+	} else if secondLevelEnumColon1RE.MatchString(enumPart) {
+		pairs = secondLevelEnumColon1RE.FindAllStringSubmatch(enumPart, -1)
+	} else if secondLevelEnumColon2RE.MatchString(enumPart) {
+		pairs = secondLevelEnumColon2RE.FindAllStringSubmatch(enumPart, -1)
+	} else {
+		return name, map[string]string{}
 	}
-	kv := make(map[string]string)
-	for _, subRes := range res {
-		kv[subRes[1]] = subRes[3]
+	// 将匹配的键值对添加到映射中
+	for _, pair := range pairs {
+		if len(pair) >= 3 {
+			key := strings.TrimSpace(pair[1])
+			value := strings.TrimSpace(pair[2])
+			enumMap[key] = value
+		}
 	}
-	return name, kv
+	if len(enumMap) == 0 {
+		return name, map[string]string{}
+	}
+	return name, enumMap
 }
 
 func (*DefaultMetaCenter) parseMySQLDDLTable(stmt *ast.CreateTableStmt) *Table {
